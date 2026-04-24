@@ -31,7 +31,13 @@ fun main(args: Array<String>) {
     Runner(options).run()
 }
 
+private val benchmarkForkJvmArgs = arrayOf(
+    "--enable-native-access=ALL-UNNAMED",
+    "--sun-misc-unsafe-memory-access=allow",
+)
+
 private fun <T : ChainedOptionsBuilder> T.applyCliMode(cli: BenchmarkCli): T = apply {
+    jvmArgsAppend(*benchmarkForkJvmArgs)
     jvmArgsAppend("-D$SAMPLE_ITERATIONS_PROPERTY=${cli.sampleIterations}")
     if (cli.jfr) {
         // 追加给 JMH fork JVM，而不是当前 Gradle/启动进程；退出时自动落盘到工作目录。
@@ -39,16 +45,22 @@ private fun <T : ChainedOptionsBuilder> T.applyCliMode(cli: BenchmarkCli): T = a
     }
     if (cli.quick) {
         forks(1)
-        warmupIterations(1)
+        warmupIterations(2)
         measurementIterations(3)
         timeout(TimeValue.seconds(30))
     }
+    cli.forks?.let(::forks)
+    cli.warmupIterations?.let(::warmupIterations)
+    cli.measurementIterations?.let(::measurementIterations)
 }
 
 private data class BenchmarkCli(
     val quick: Boolean = false,
     val jfr: Boolean = false,
     val sampleIterations: Int = DEFAULT_SAMPLE_ITERATIONS,
+    val forks: Int? = null,
+    val warmupIterations: Int? = null,
+    val measurementIterations: Int? = null,
     val engineValues: List<String>? = null,
     val caseValues: List<String>? = null,
     val phaseRegex: String = ".*",
@@ -58,6 +70,9 @@ private data class BenchmarkCli(
             var quick = false
             var jfr = false
             var sampleIterations = DEFAULT_SAMPLE_ITERATIONS
+            var forks: Int? = null
+            var warmupIterations: Int? = null
+            var measurementIterations: Int? = null
             var engineValues: List<String>? = null
             var caseValues: List<String>? = null
             var phaseRegex = ".*"
@@ -72,8 +87,10 @@ private data class BenchmarkCli(
                     "--case" ->
                         caseValues = SCRIPT_CASE_IDS.filterByPattern(reader.value(option), option, "脚本样本")
                     "--phase" -> phaseRegex = phaseRegexOf(reader.value(option))
-                    "--sampleIterations", "--iterations" ->
-                        sampleIterations = positiveInt(reader.value(option), option)
+                    "--sampleIterations" -> sampleIterations = positiveInt(reader.value(option), option)
+                    "--forks" -> forks = positiveInt(reader.value(option), option)
+                    "--warmup" -> warmupIterations = positiveInt(reader.value(option), option)
+                    "--measure" -> measurementIterations = positiveInt(reader.value(option), option)
                     "--help", "-h" -> printUsageAndExit()
                     else -> error("未知参数: $option，使用 --help 查看用法")
                 }
@@ -83,6 +100,9 @@ private data class BenchmarkCli(
                 quick = quick,
                 jfr = jfr,
                 sampleIterations = sampleIterations,
+                forks = forks,
+                warmupIterations = warmupIterations,
+                measurementIterations = measurementIterations,
                 engineValues = engineValues,
                 caseValues = caseValues,
                 phaseRegex = phaseRegex,
@@ -121,7 +141,9 @@ private data class BenchmarkCli(
                   --quick                         使用较少迭代快速冒烟测试
                   --jfr                           为 JMH fork JVM 开启 Java Flight Recorder
                   --sampleIterations <n>          设置每个脚本样本内部循环次数，默认 $DEFAULT_SAMPLE_ITERATIONS
-                  --iterations <n>                --sampleIterations 的别名
+                  --forks <n>                     覆盖 JMH fork 次数
+                  --warmup <n>                    覆盖 JMH warmup 迭代次数
+                  --measure <n>                   覆盖 JMH measurement 迭代次数
                   --engine <regex>                筛选引擎；精确名称也可直接写：${ENGINE_NAMES.joinToString()}
                   --case <regex>                  筛选脚本样本；精确 ID 也可直接写：${SCRIPT_CASE_IDS.joinToString()}
                   --phase <phase>                 compile / compiledExecution / interpretedExecution / all

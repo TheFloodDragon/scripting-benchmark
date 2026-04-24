@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       jmh_args:
-        description: "Extra JMH args, e.g. --quick --engine GraalJS --case compute"
+        description: "Extra JMH args, e.g. --forks 1 --warmup 3 --measure 5"
         required: false
         default: ""
         type: string
       enable_jfr:
-        description: "Enable Java Flight Recorder for JMH fork JVMs"
+        description: "Enable Java Flight Recorder"
         required: true
         default: false
         type: boolean
@@ -29,6 +29,9 @@ jobs:
         with:
           distribution: graalvm
           java-version: "25"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Prepare Gradle wrapper
         run: chmod +x ./gradlew
