@@ -31,13 +31,7 @@ fun main(args: Array<String>) {
     Runner(options).run()
 }
 
-private val benchmarkForkJvmArgs = arrayOf(
-    "--enable-native-access=ALL-UNNAMED",
-    "--sun-misc-unsafe-memory-access=allow",
-)
-
 private fun <T : ChainedOptionsBuilder> T.applyCliMode(cli: BenchmarkCli): T = apply {
-    jvmArgsAppend(*benchmarkForkJvmArgs)
     jvmArgsAppend("-D$SAMPLE_ITERATIONS_PROPERTY=${cli.sampleIterations}")
     if (cli.jfr) {
         // 追加给 JMH fork JVM，而不是当前 Gradle/启动进程；退出时自动落盘到工作目录。

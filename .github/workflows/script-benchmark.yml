@@ -19,6 +19,10 @@ jobs:
     name: Run script benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      JAVA_TOOL_OPTIONS: >-
+        --enable-native-access=ALL-UNNAMED
+        --sun-misc-unsafe-memory-access=allow
 
     steps:
       - name: Checkout repository
