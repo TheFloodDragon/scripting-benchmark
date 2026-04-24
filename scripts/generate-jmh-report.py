@@ -2,6 +2,7 @@
 import argparse
 import datetime as dt
 import json
+import math
 from collections import defaultdict
 from pathlib import Path
 
@@ -53,7 +54,13 @@ DISPLAY_UNIT_TO_US = {
 def to_display(value, source_unit, display_unit):
     if value is None:
         return 0.0
-    return value * UNIT_TO_US.get(source_unit, 1.0) / DISPLAY_UNIT_TO_US[display_unit]
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(number):
+        return 0.0
+    return number * UNIT_TO_US.get(source_unit, 1.0) / DISPLAY_UNIT_TO_US[display_unit]
 
 
 def percentile(metric, key):
@@ -63,6 +70,46 @@ def percentile(metric, key):
 def sample_path(engine, case):
     directory, extension = ENGINE_SAMPLES.get(engine, (engine.lower(), ""))
     return f"/samples/{directory}/{case}{extension}"
+
+
+def resolve_input_files(inputs):
+    files = []
+    for raw_input in inputs:
+        input_path = Path(raw_input)
+        if input_path.is_dir():
+            files.extend(sorted(path for path in input_path.rglob("*.json") if path.is_file()))
+        elif input_path.is_file():
+            files.append(input_path)
+        else:
+            raise SystemExit(f"找不到 JMH 结果文件或目录: {input_path}")
+
+    unique_files = []
+    seen = set()
+    for file in files:
+        key = file.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_files.append(file)
+
+    if not unique_files:
+        raise SystemExit("没有找到任何 JMH JSON 结果文件")
+    return unique_files
+
+
+def load_jmh_results(input_files):
+    data = []
+    for input_file in input_files:
+        content = json.loads(input_file.read_text(encoding="utf-8"))
+        if not isinstance(content, list):
+            raise SystemExit(f"JMH JSON 根节点必须是数组: {input_file}")
+        for item in content:
+            if not isinstance(item, dict):
+                raise SystemExit(f"JMH JSON 条目必须是对象: {input_file}")
+            item = dict(item)
+            item["_resultFile"] = str(input_file)
+            data.append(item)
+    return data
 
 
 def parse_rows(data):
@@ -90,8 +137,55 @@ def parse_rows(data):
             "forks": item.get("forks", 0),
             "warmup": item.get("warmupIterations", 0),
             "measure": item.get("measurementIterations", 0),
+            "result_file": item.get("_resultFile", ""),
         })
     return rows
+
+
+def append_input_files(lines, input_files):
+    lines.append(f"- JMH 结果文件：`{len(input_files)}` 个")
+    if len(input_files) == 1:
+        lines.append(f"- 结果路径：`{input_files[0]}`")
+        return
+
+    lines.extend([
+        "",
+        "<details>",
+        "<summary>结果文件列表</summary>",
+        "",
+    ])
+    for input_file in input_files:
+        lines.append(f"- `{input_file}`")
+    lines.extend(["", "</details>"])
+
+
+def append_matrix_overview(lines, rows, input_file_count):
+    if input_file_count <= 1:
+        return
+
+    counts = defaultdict(lambda: defaultdict(int))
+    for row in rows:
+        counts[row["engine"]][row["phase"]] += 1
+
+    phase_order = ["compile", "compiledExecution", "interpretedExecution"]
+    lines.extend([
+        "",
+        "## 矩阵汇总",
+        "",
+        f"- 合并结果条目：`{len(rows)}` 条",
+        "",
+        "| 引擎 | 编译测试 | 编译运行测试 | 解释运行测试 |",
+        "|---|---:|---:|---:|",
+    ])
+    for engine in sorted(counts):
+        phase_counts = [counts[engine].get(phase, 0) for phase in phase_order]
+        lines.append(
+            f"| {engine or '未知'} "
+            f"| {phase_counts[0] or '-'} "
+            f"| {phase_counts[1] or '-'} "
+            f"| {phase_counts[2] or '-'} |"
+        )
+    lines.append("")
 
 
 def append_report(lines, rows):
@@ -140,23 +234,24 @@ def append_report(lines, rows):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="将 JMH JSON 结果转换为中文 Markdown 报告。")
-    parser.add_argument("--input", default="build/reports/jmh/results.json", help="JMH JSON 结果文件")
+    parser = argparse.ArgumentParser(description="将一个或多个 JMH JSON 结果转换为中文 Markdown 报告。")
+    parser.add_argument(
+        "--input",
+        nargs="+",
+        default=["build/reports/jmh/results.json"],
+        help="JMH JSON 结果文件或目录；可传入多个路径，目录会递归读取 *.json",
+    )
     parser.add_argument("--output", default="build/reports/jmh/report.md", help="Markdown 报告输出路径")
     parser.add_argument("--jfr", default="false", help="是否开启 JFR")
     parser.add_argument("--args", default="", help="基准测试启动参数")
     args = parser.parse_args()
 
-    input_path = Path(args.input)
+    input_files = resolve_input_files(args.input)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not input_path.exists():
-        raise SystemExit(f"找不到 JMH 结果文件: {input_path}")
-
-    data = json.loads(input_path.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise SystemExit("JMH JSON 根节点必须是数组")
+    data = load_jmh_results(input_files)
+    rows = parse_rows(data)
 
     lines = [
         "# 脚本引擎 JMH 性能测试报告",
@@ -164,9 +259,11 @@ def main():
         f"- 生成时间：`{dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()}`",
         f"- 是否开启 JFR：`{args.jfr}`",
         f"- JMH 参数：`{args.args or '默认参数'}`",
-        "",
     ]
-    append_report(lines, parse_rows(data))
+    append_input_files(lines, input_files)
+    lines.append("")
+    append_matrix_overview(lines, rows, len(input_files))
+    append_report(lines, rows)
 
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
