@@ -1,0 +1,95 @@
+name: Script Engine JMH Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      jmh_args:
+        description: >-
+          Arguments passed to ScriptBenchmarkMain. Default runs the full matrix.
+          --engine/--case accept exact names or regex.
+          Example: --quick --engine 'GraalJS|Jexl' --case compute --phase compiledExecution
+        required: false
+        default: ""
+        type: string
+      enable_jfr:
+        description: "Enable Java Flight Recorder for JMH fork JVMs"
+        required: true
+        default: false
+        type: boolean
+
+jobs:
+  benchmark:
+    name: Run script benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up GraalVM
+        uses: graalvm/setup-graalvm@v1
+        with:
+          distribution: graalvm
+          java-version: "23"
+
+      - name: Prepare Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Compile benchmark program
+        run: ./gradlew clean classes
+
+      - name: Run JMH benchmark
+        env:
+          INPUT_JMH_ARGS: ${{ inputs.jmh_args }}
+          ENABLE_JFR: ${{ inputs.enable_jfr }}
+        run: |
+          mkdir -p build/reports/jmh build/reports/jfr
+          JMH_ARGS="${INPUT_JMH_ARGS:-}"
+          if [[ "$ENABLE_JFR" == "true" ]]; then
+            ./gradlew runScriptBenchmark -PenableJfr=true -PjmhArgs="$JMH_ARGS"
+          else
+            ./gradlew runScriptBenchmark -PjmhArgs="$JMH_ARGS"
+          fi
+
+      - name: Collect JFR files
+        if: always()
+        run: |
+          mkdir -p build/reports/jfr
+          find . -maxdepth 2 -type f -name '*.jfr' ! -path './build/reports/jfr/*' -exec mv '{}' build/reports/jfr/ \;
+          ls -la build/reports/jfr || true
+
+      - name: Build executable benchmark jar
+        if: always()
+        run: ./gradlew benchmarkJar
+
+      - name: Generate Markdown report
+        if: always()
+        env:
+          INPUT_JMH_ARGS: ${{ inputs.jmh_args }}
+          ENABLE_JFR: ${{ inputs.enable_jfr }}
+        run: |
+          mkdir -p build/reports/jmh
+          if [[ -f build/reports/jmh/results.json ]]; then
+            python3 scripts/generate-jmh-report.py \
+              --input build/reports/jmh/results.json \
+              --output build/reports/jmh/report.md \
+              --jfr "$ENABLE_JFR" \
+              --args "${INPUT_JMH_ARGS:-}"
+          else
+            cat > build/reports/jmh/report.md <<'EOF'
+          # 脚本引擎 JMH 性能测试报告
+
+          本次执行未生成 `build/reports/jmh/results.json`。
+          请查看上传的 Gradle/JMH 日志与其它产物定位原因。
+          EOF
+          fi
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-jmh-benchmark-${{ github.run_number }}
+          if-no-files-found: warn
+          path: |
+            build/reports/**

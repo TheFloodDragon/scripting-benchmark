@@ -1,0 +1,19 @@
+[versions]
+kotlin = "2.3.0"
+nashorn = "15.7"
+graaljs = "25.0.2"
+fluxon = "-SNAPSHOT"
+jexl = "3.6.1"
+jmh = "1.37"
+
+[libraries]
+nashorn = { group = "org.openjdk.nashorn", name = "nashorn-core", version.ref = "nashorn" }
+graalvm-polyglot = { group = "org.graalvm.polyglot", name = "polyglot", version.ref = "graaljs" }
+jexl = { group = "org.apache.commons", name = "commons-jexl3", version.ref = "jexl" }
+fluxon = { group = "com.github.TabooLib.fluxon", name = "core", version.ref = "fluxon" }
+jmh-core = { group = "org.openjdk.jmh", name = "jmh-core", version.ref = "jmh" }
+jmh-annprocess = { group = "org.openjdk.jmh", name = "jmh-generator-annprocess", version.ref = "jmh" }
+
+[plugins]
+kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlinKapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
