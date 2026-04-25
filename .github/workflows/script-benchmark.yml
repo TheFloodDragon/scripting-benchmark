@@ -34,84 +34,36 @@ jobs:
           import re
           import shlex
 
-          engines = [
-              "GraalJS",
-              "Nashorn",
-              "Jexl",
-              "KotlinScripting",
-              "Fluxon",
-          ]
-          phases = ["compile", "compiledExecution", "interpretedExecution"]
-          phase_aliases = {
-              "compile": ["compile"],
-              "compiledExecution": ["compiled", "compiledExecution", "runCompiled"],
-              "interpretedExecution": ["interpret", "interpreted", "interpretedExecution"],
-              "all": ["all"],
+          ENGINES = "GraalJS Nashorn Jexl KotlinScripting KotlinScriptingOptimized Fluxon".split()
+          PHASES = "compile compiledExecution interpretedExecution".split()
+          PHASE_ALIASES = {
+              "compiled": "compiledExecution",
+              "runCompiled": "compiledExecution",
+              "interpret": "interpretedExecution",
+              "interpreted": "interpretedExecution",
           }
 
-          def option_value(tokens, option):
-              for index, token in enumerate(tokens):
-                  if token == option:
-                      if index + 1 >= len(tokens):
-                          raise SystemExit(f"{option} 需要一个值")
-                      return tokens[index + 1]
-              return None
+          tokens = shlex.split(os.environ.get("INPUT_JMH_ARGS", ""))
+          options = dict(zip(tokens, tokens[1:]))
+          engine_pattern = options.get("--engine", ".*")
+          phase = PHASE_ALIASES.get(options.get("--phase"), options.get("--phase", "all"))
 
-          def strip_options(tokens, options):
-              stripped = []
-              skip_next = False
-              for token in tokens:
-                  if skip_next:
-                      skip_next = False
-                      continue
-                  if token in options:
-                      skip_next = True
-                      continue
-                  stripped.append(token)
-              return stripped
+          engines = [engine for engine in ENGINES if re.fullmatch(engine_pattern, engine)]
+          if not engines:
+              raise SystemExit(f"--engine 没有匹配任何引擎: {engine_pattern}")
+          if phase not in ["all", *PHASES]:
+              raise SystemExit("--phase 仅支持 compile / compiledExecution / interpretedExecution / all")
 
-          raw_args = os.environ.get("INPUT_JMH_ARGS", "")
-          tokens = shlex.split(raw_args)
-
-          engine_pattern = option_value(tokens, "--engine")
-          if engine_pattern:
-              try:
-                  engine_regex = re.compile(engine_pattern)
-              except re.error as exc:
-                  raise SystemExit(f"--engine 正则无效: {exc}")
-              selected_engines = [engine for engine in engines if engine_regex.fullmatch(engine)]
-              if not selected_engines:
-                  raise SystemExit(f"--engine 没有匹配任何引擎: {engine_pattern}")
-          else:
-              selected_engines = engines
-
-          phase_value = option_value(tokens, "--phase")
-          if phase_value:
-              selected_phases = None
-              for canonical, aliases in phase_aliases.items():
-                  if phase_value in aliases:
-                      selected_phases = phases if canonical == "all" else [canonical]
-                      break
-              if selected_phases is None:
-                  raise SystemExit("--phase 仅支持 compile / compiledExecution / interpretedExecution / all")
-          else:
-              selected_phases = phases
-
-          extra_tokens = strip_options(tokens, {"--engine", "--phase"})
-          matrix = {
-              "include": [
-                  {"engine": engine, "phase": phase}
-                  for engine in selected_engines
-                  for phase in selected_phases
-              ]
-          }
-          extra_jmh_args = shlex.join(extra_tokens)
+          phases = PHASES if phase == "all" else [phase]
+          extra_args = shlex.join([
+              token for index, token in enumerate(tokens)
+              if token not in {"--engine", "--phase"} and tokens[index - 1:index] != ["--engine"] and tokens[index - 1:index] != ["--phase"]
+          ])
+          matrix = {"include": [{"engine": engine, "phase": phase} for engine in engines for phase in phases]}
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
-              output.write("extra_jmh_args<<EOF\n")
-              output.write(extra_jmh_args)
-              output.write("\nEOF\n")
+              output.write(f"extra_jmh_args<<EOF\n{extra_args}\nEOF\n")
           PY
 
   benchmark:
