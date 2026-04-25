@@ -1,5 +1,6 @@
 .gradle/
 .kotlin/
 build
+__pycache__
 .narrafork/
 .worktrees/

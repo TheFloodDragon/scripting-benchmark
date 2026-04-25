@@ -137,26 +137,12 @@ def parse_rows(data):
             "forks": item.get("forks", 0),
             "warmup": item.get("warmupIterations", 0),
             "measure": item.get("measurementIterations", 0),
-            "result_file": item.get("_resultFile", ""),
         })
     return rows
 
 
-def append_input_files(lines, input_files):
-    lines.append(f"- JMH 结果文件：`{len(input_files)}` 个")
-    if len(input_files) == 1:
-        lines.append(f"- 结果路径：`{input_files[0]}`")
-        return
-
-    lines.extend([
-        "",
-        "<details>",
-        "<summary>结果文件列表</summary>",
-        "",
-    ])
-    for input_file in input_files:
-        lines.append(f"- `{input_file}`")
-    lines.extend(["", "</details>"])
+def append_input_summary(lines, input_file_count):
+    lines.append(f"- JMH 结果文件：`{input_file_count}` 个")
 
 
 def append_matrix_overview(lines, rows, input_file_count):
@@ -260,9 +246,10 @@ def main():
         f"- 是否开启 JFR：`{args.jfr}`",
         f"- JMH 参数：`{args.args or '默认参数'}`",
     ]
-    append_input_files(lines, input_files)
+    input_file_count = len(input_files)
+    append_input_summary(lines, input_file_count)
     lines.append("")
-    append_matrix_overview(lines, rows, len(input_files))
+    append_matrix_overview(lines, rows, input_file_count)
     append_report(lines, rows)
 
     output_path.write_text("\n".join(lines), encoding="utf-8")

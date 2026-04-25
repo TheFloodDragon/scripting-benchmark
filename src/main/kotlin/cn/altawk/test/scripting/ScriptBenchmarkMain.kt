@@ -10,6 +10,7 @@ import java.io.File
 const val JMH_RESULT_PATH = "build/reports/jmh/results.json"
 private val ENGINE_NAMES get() = SCRIPT_ENGINE_ADAPTERS.map { it.engineName }
 private val SCRIPT_CASE_IDS get() = BENCHMARK_SCRIPT_CASES.map { it.id }
+private val PHASES = setOf("compile", "compiledExecution", "interpretedExecution")
 
 /** 命令行入口：解析自定义参数，然后用 JMH Runner 执行实际基准。 */
 fun main(args: Array<String>) {
@@ -17,8 +18,9 @@ fun main(args: Array<String>) {
     System.setProperty(SAMPLE_ITERATIONS_PROPERTY, cli.sampleIterations.toString())
     File(JMH_RESULT_PATH).parentFile?.mkdirs()
 
+    val benchmarkClassName = Regex.escape(ScriptEngineJmhBenchmark::class.java.name)
     val options = OptionsBuilder()
-        .include(ScriptEngineJmhBenchmark::class.java.name + ".*" + cli.phaseRegex)
+        .include("$benchmarkClassName\\.${cli.phaseRegex}$")
         .detectJvmArgs()
         .shouldFailOnError(true)
         .result(JMH_RESULT_PATH)
@@ -116,12 +118,11 @@ private data class BenchmarkCli(
             return values
         }
 
-        private fun phaseRegexOf(value: String): String = when (value) {
-            "compile" -> "compile"
-            "compiled", "compiledExecution", "runCompiled" -> "compiledExecution"
-            "interpret", "interpreted", "interpretedExecution" -> "interpretedExecution"
-            "all" -> ".*"
-            else -> error("--phase 仅支持 compile / compiledExecution / interpretedExecution / all")
+        private fun phaseRegexOf(value: String): String {
+            require(value == "all" || value in PHASES) {
+                "--phase 仅支持 compile / compiledExecution / interpretedExecution / all"
+            }
+            return if (value == "all") ".*" else value
         }
 
         private fun printUsageAndExit(): Nothing {

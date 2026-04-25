@@ -34,19 +34,30 @@ jobs:
           import re
           import shlex
 
-          ENGINES = "GraalJS Nashorn Jexl KotlinScripting KotlinScriptingOptimized Fluxon".split()
-          PHASES = "compile compiledExecution interpretedExecution".split()
-          PHASE_ALIASES = {
-              "compiled": "compiledExecution",
-              "runCompiled": "compiledExecution",
-              "interpret": "interpretedExecution",
-              "interpreted": "interpretedExecution",
-          }
+          ENGINES = [
+              "GraalJS",
+              "Nashorn",
+              "Jexl",
+              "KotlinScripting",
+              "KotlinScriptingOptimized",
+              "Fluxon",
+          ]
+          PHASES = ["compile", "compiledExecution", "interpretedExecution"]
 
           tokens = shlex.split(os.environ.get("INPUT_JMH_ARGS", ""))
-          options = dict(zip(tokens, tokens[1:]))
-          engine_pattern = options.get("--engine", ".*")
-          phase = PHASE_ALIASES.get(options.get("--phase"), options.get("--phase", "all"))
+
+          def take_option(name, default):
+              if name not in tokens:
+                  return default
+              index = tokens.index(name)
+              if index + 1 >= len(tokens):
+                  raise SystemExit(f"{name} 需要一个值")
+              value = tokens[index + 1]
+              del tokens[index:index + 2]
+              return value
+
+          engine_pattern = take_option("--engine", ".*")
+          phase = take_option("--phase", "all")
 
           engines = [engine for engine in ENGINES if re.fullmatch(engine_pattern, engine)]
           if not engines:
@@ -55,10 +66,7 @@ jobs:
               raise SystemExit("--phase 仅支持 compile / compiledExecution / interpretedExecution / all")
 
           phases = PHASES if phase == "all" else [phase]
-          extra_args = shlex.join([
-              token for index, token in enumerate(tokens)
-              if token not in {"--engine", "--phase"} and tokens[index - 1:index] != ["--engine"] and tokens[index - 1:index] != ["--phase"]
-          ])
+          extra_args = shlex.join(tokens)
           matrix = {"include": [{"engine": engine, "phase": phase} for engine in engines for phase in phases]}
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -90,6 +98,8 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          add-job-summary: never
 
       - name: Prepare Gradle wrapper
         run: chmod +x ./gradlew
@@ -184,6 +194,4 @@ jobs:
           name: script-jmh-report-${{ github.run_number }}
           if-no-files-found: warn
           retention-days: 14
-          path: |
-            build/reports/jmh/report.md
-            build/reports/jmh/downloaded/**
+          path: build/reports/jmh/report.md
